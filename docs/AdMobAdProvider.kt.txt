@@ -1,0 +1,39 @@
+// НЕ ПРОВЕРЕНО: шаблон, в этой среде не компилировался. Сверьтесь с актуальной документацией AdMob.
+// 1) app/build.gradle.kts:  implementation("com.google.android.gms:play-services-ads:23.3.0")  (возьмите свежую версию)
+// 2) AndroidManifest.xml, внутри <application>:
+//    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID"
+//               android:value="ca-app-pub-3940256099942544~3347511713"/>   <!-- ТЕСТОВЫЙ ID -->
+// 3) Файл переименуйте в AdMobAdProvider.kt (пакет com.pixelhero.widget) и в MainActivity.onCreate:
+//       MobileAds.initialize(this); Ads.provider = AdMobAdProvider(this)
+// 4) Для ЕС (вы в Италии, ваши игроки тоже) обязательно согласие через UMP SDK
+//    (com.google.android.ump:user-messaging-platform) ДО запроса рекламы.
+// 5) Перед релизом замените тестовые ID на свои. Кликать по своим боевым объявлениям нельзя.
+
+package com.pixelhero.widget
+
+import android.app.Activity
+import android.content.Context
+import com.google.android.gms.ads.AdError
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.FullScreenContentCallback
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.rewarded.RewardedAd
+import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+
+class AdMobAdProvider(private val ctx: Context) : AdProvider {
+    private val unitId = "ca-app-pub-3940256099942544/5224354917" // тестовый rewarded
+
+    override fun showRewarded(activity: Activity, onReward: () -> Unit, onFail: (String) -> Unit) {
+        RewardedAd.load(ctx, unitId, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
+            override fun onAdFailedToLoad(e: LoadAdError) = onFail("Реклама недоступна, попробуйте позже")
+            override fun onAdLoaded(ad: RewardedAd) {
+                var rewarded = false
+                ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+                    override fun onAdDismissedFullScreenContent() { if (!rewarded) onFail("Ролик не досмотрен") }
+                    override fun onAdFailedToShowFullScreenContent(e: AdError) = onFail("Не удалось показать ролик")
+                }
+                ad.show(activity) { rewarded = true; onReward() }
+            }
+        })
+    }
+}
