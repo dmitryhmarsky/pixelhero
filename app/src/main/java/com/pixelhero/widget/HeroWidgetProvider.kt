@@ -51,7 +51,7 @@ class HeroWidgetProvider : AppWidgetProvider() {
                 val s = minOf(wPx / Scene.W, hPx / Scene.H).toInt()
                 if (s < best) best = s
             }
-            Engine.scale = best.coerceIn(2, 8)
+            Engine.scale = best.coerceIn(2, 4)
         }
 
         /** Обновляет все виджеты. full = true ставит и обработчик нажатия, иначе меняется только картинка. */

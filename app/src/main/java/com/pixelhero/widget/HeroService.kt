@@ -33,8 +33,8 @@ class HeroService : Service() {
             HeroWidgetProvider.update(this@HeroService, full = false)
             syncDeathNotification(Engine.get(this@HeroService).dead)
             frames++
-            if (frames % 120 == 0) Engine.save(this@HeroService)
-            handler.postDelayed(this, FRAME_MS)
+            if (frames % (Engine.fps * 30) == 0) Engine.save(this@HeroService)
+            handler.postDelayed(this, 1000L / Engine.fps)
         }
     }
 
@@ -146,7 +146,6 @@ class HeroService : Service() {
         private const val NOTIF_ID = 1
         private const val DEATH_ID = 2
         private const val DEATH_CHANNEL = "death"
-        private const val FRAME_MS = 250L
 
         /** Запускает сервис; в фоне Android 12+ может отказать, это не ошибка. */
         fun startSafely(context: Context) {

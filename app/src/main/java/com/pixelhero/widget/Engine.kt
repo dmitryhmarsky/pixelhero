@@ -21,10 +21,23 @@ object Engine {
     @Volatile
     var scale: Int = 5
 
+    /** Кадров в секунду анимации виджета (5, 10 или 15). Выше плавнее, но больше расход батареи. */
+    @Volatile
+    var fps: Int = 10
+        private set
+
+    fun setFps(ctx: Context, v: Int) {
+        fps = v.coerceIn(2, 20)
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("fps", fps).apply()
+    }
+
+    private val canvas = Canvas(Scene.W, Scene.H)
+
     @Synchronized
     fun get(ctx: Context): GameState {
         state?.let { return it }
         val prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        fps = prefs.getInt("fps", 10).coerceIn(2, 20)
         val seed = System.nanoTime()
         val loaded = GameState.deserialize(prefs.getString(KEY, null), seed) ?: GameState(seed)
         state = loaded
@@ -55,7 +68,7 @@ object Engine {
     /** Рисует текущий кадр и возвращает Bitmap (Scene.W*scale x Scene.H*scale). */
     @Synchronized
     fun renderBitmap(ctx: Context): Bitmap {
-        val c = Canvas(Scene.W, Scene.H)
+        val c = canvas
         Scene.render(get(ctx), c)
         val s = scale
         val px = c.scaled(s)

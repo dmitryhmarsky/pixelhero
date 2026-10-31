@@ -99,6 +99,40 @@ class Canvas(val w: Int, val h: Int) {
         }
     }
 
+    /** Крупный текст: каждый пиксель шрифта 3x5 превращается в квадрат k x k. */
+    fun textS(s: String, x: Int, y: Int, color: Int, k: Int, shadow: Boolean = true) {
+        if (shadow) drawTextS(s, x + k, y + k, 0xFF000000.toInt(), k)
+        drawTextS(s, x, y, color, k)
+    }
+
+    fun textWidthS(s: String, k: Int): Int = if (s.isEmpty()) 0 else (s.length * 4 - 1) * k
+
+    private fun drawTextS(s: String, x: Int, y: Int, color: Int, k: Int) {
+        var cx = x
+        for (ch in s) {
+            val g = Font.glyph(ch)
+            for (j in 0 until 5) for (i in 0 until 3) {
+                if (g[j][i] == '#') rect(cx + i * k, y + j * k, k, k, color)
+            }
+            cx += 4 * k
+        }
+    }
+
+    /** Мягкая овальная тень на земле (затемняет то, что уже нарисовано). */
+    fun shadowE(cx: Int, cy: Int, hw: Int, hh: Int, strength: Float = 0.34f) {
+        for (j in -hh..hh) for (i in -hw..hw) {
+            val a = i.toFloat() / (hw + 0.5f)
+            val b = j.toFloat() / (hh + 0.5f)
+            val d = a * a + b * b
+            if (d > 1f) continue
+            val x = cx + i
+            val y = cy + j
+            if (x in 0 until w && y in 0 until h) {
+                px[y * w + x] = lerpColor(px[y * w + x], 0xFF000000.toInt(), if (d > 0.6f) strength * 0.55f else strength)
+            }
+        }
+    }
+
     /** Затемняет картинку: factor 1.0 = без изменений, 0.0 = чёрный. */
     fun dim(factor: Float) {
         for (i in px.indices) {

@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var openAdBtn: Button
     private var adBusy = false
     private val slotViews = ArrayList<TextView>()
+    private val fpsButtons = LinkedHashMap<Int, Button>()
     private lateinit var packBtn: Button
 
     private fun rarityColor(r: Int): Int = Rarity.COLORS[r.coerceIn(0, Rarity.COUNT - 1)] or (0xFF shl 24)
@@ -354,6 +355,32 @@ class MainActivity : Activity() {
             root.addView(b, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
 
+        val fpsHead = TextView(this).apply {
+            text = "Плавность виджета"
+            textSize = 20f
+            setTextColor(Color.rgb(255, 224, 138))
+            setPadding(0, dp(16), 0, dp(4))
+        }
+        root.addView(fpsHead)
+        val fpsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (f in intArrayOf(5, 10, 15)) {
+            val b = Button(this).apply {
+                text = "$f кадров/с"
+                isAllCaps = false
+                textSize = 12f
+                setOnClickListener { Engine.setFps(this@MainActivity, f); render() }
+            }
+            fpsButtons[f] = b
+            fpsRow.addView(b, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        root.addView(fpsRow)
+        val fpsNote = TextView(this).apply {
+            text = "Больше кадров плавнее, но заметнее расход батареи. Анимация идёт только при включённом экране."
+            textSize = 13f
+            setTextColor(Color.rgb(160, 170, 190))
+        }
+        root.addView(fpsNote)
+
         val howTo = TextView(this).apply {
             text = "Как добавить виджет: удерживайте пустое место на домашнем экране → «Виджеты» → «Пиксель-герой». " +
                 "Герой ходит и сражается сам, даже пока вы не смотрите: прогресс считается и в офлайне (до 8 часов). " +
@@ -403,6 +430,7 @@ class MainActivity : Activity() {
             slotViews[i].text = if (w == null) colored("${slot.title}: пусто", Color.rgb(120, 130, 150))
             else SpannableStringBuilder().append(slot.title + ": ").append(colored(w.name(), rarityColor(w.rarity))).append("  ур.${w.ilvl}\n   " + w.statLines().joinToString(", "))
         }
+        for ((f, b) in fpsButtons) b.isEnabled = f != Engine.fps
         packBtn.text = "Рюкзак ${g.inventory.size}/${Gear.INV_CAP}"
         for ((i, b) in classButtons.withIndex()) b.isEnabled = i != g.heroClass
         classDesc.text = "${Balance.CLASS_NAMES[g.heroClass]}: ${Balance.CLASS_DESC[g.heroClass]}"

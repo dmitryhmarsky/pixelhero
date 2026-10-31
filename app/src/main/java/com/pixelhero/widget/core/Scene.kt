@@ -2,13 +2,20 @@ package com.pixelhero.widget.core
 
 import kotlin.math.sin
 
-/** Отрисовка сцены виджета в виртуальном разрешении 192x48: 16 зон, параллакс, частицы, герой выбранного класса. */
+/**
+ * Сцена виджета 384x96. Фон (небо, дальние слои, декор, земля, частицы) рисуется в 192x48 и увеличивается вдвое,
+ * а герои, монстры, сундуки, полоски и текст рисуются поверх в полном разрешении.
+ */
 object Scene {
-    const val W = 192
-    const val H = 48
-    const val GROUND = 34
-    const val HERO_X = 14
-    private const val HERO_H = 16
+    const val W = 384
+    const val H = 96
+    private const val LW = 192
+    private const val LH = 48
+    private const val LG = 34              // земля в низком разрешении
+    const val GROUND = 68                  // земля в полном (LG * 2)
+    const val HERO_X = 24                  // левый край спрайта героя
+    private const val MON_X0 = 70          // левый край монстра при dist = 0
+    private val lo = Canvas(LW, LH)
 
     private class Theme(
         val skyTop: Int, val skyBot: Int, val far: Int, val hill1: Int, val hill2: Int,
@@ -49,14 +56,44 @@ object Scene {
     fun render(g: GameState, c: Canvas) {
         val zone = Balance.zoneOf(g.stage)
         val th = THEMES[zone]
-        drawBackground(g, c, th, zone)
-        drawGround(g, c, th, zone)
+        drawBackground(g, lo, th, zone)
+        drawGround(g, lo, th, zone)
+        drawAmbient(g, lo, th, zone)
+        upscale2(lo, c)
+        drawGroundDetail(g, c, th, zone)
         drawChestDrop(g, c)
         drawActors(g, c, zone)
-        drawAmbient(g, c, th, zone)
         if (g.dead) c.dim(0.5f)
         drawHud(g, c)
         if (g.dead) drawDeadOverlay(g, c)
+    }
+
+    private fun upscale2(src: Canvas, dst: Canvas) {
+        val sw = src.w
+        val dw = dst.w
+        for (y in 0 until src.h) {
+            val row = y * 2 * dw
+            for (x in 0 until sw) {
+                val v = src.px[y * sw + x]
+                val i = row + x * 2
+                dst.px[i] = v; dst.px[i + 1] = v; dst.px[i + dw] = v; dst.px[i + dw + 1] = v
+            }
+        }
+    }
+
+    /** Мелкие детали земли в полном разрешении: травинки на кромке и тёмная полоса под ней. */
+    private fun drawGroundDetail(g: GameState, c: Canvas, t: Theme, zone: Int) {
+        val s = (g.scroll * 2f).toInt()
+        val light = lighten(t.grass, 0.3f)
+        val dark = darken(t.grass, 0.28f)
+        for (x in 0 until W) {
+            val wx = x + s
+            val h = wx and 0xFFFF
+            if (h % 5 == 0) c.put(x, GROUND - 1, light)
+            if (h % 11 == 3) { c.put(x, GROUND - 1, t.grass); c.put(x, GROUND - 2, light) }
+            if (h % 17 == 7) c.put(x, GROUND + 1, dark)
+            if (h % 23 == 5) { c.put(x, GROUND + 3, lighten(t.dirt, 0.18f)); c.put(x + 1, GROUND + 4, darken(t.dirt, 0.25f)) }
+        }
     }
 
     private fun pmod(a: Double, m: Double): Double = ((a % m) + m) % m
@@ -83,47 +120,50 @@ object Scene {
     private fun lighten(col: Int, a: Float) = lerpColor(col, rgb(0xFFFFFF), a)
     private fun darken(col: Int, a: Float) = lerpColor(col, rgb(0x000000), a)
 
-    // ---------- вспомогательные эффекты ----------
+    // ---------- верхний слой, полное разрешение 384x96 ----------
     private fun drawChestDrop(g: GameState, c: Canvas) {
         if (g.dropRarity < 0 || g.dropTimer <= 0f || g.dead) return
         val age = 3f - g.dropTimer
-        val x = 44 - (g.scroll - g.dropScroll).toInt()
-        if (x < HERO_X) return
-        val fall = if (age < 0.4f) ((0.4f - age) * 50f).toInt() else 0
-        val y = GROUND - 7 - fall
+        val art = Sprites.CHEST
+        val x = 88 - ((g.scroll - g.dropScroll) * 2f).toInt()
+        if (x < HERO_X + 30) return
+        val fall = if (age < 0.4f) ((0.4f - age) * 110f).toInt() else 0
+        val y = GROUND + 4 - art.size - fall
         val glow = rgb(Rarity.COLORS[g.dropRarity])
         if (g.dropRarity >= 2) {
-            val a = lerpColor(glow, rgb(0xFFFFFF), 0.3f)
-            val twinkle = ((g.anim * 6).toInt() % 2)
-            c.put(x - 1 + twinkle, y - 2, a)
-            c.put(x + 9 - twinkle, y - 1, a)
-            if (g.dropRarity >= 4) c.put(x + 4, y - 3 - twinkle, rgb(0xFFFFFF))
+            val a = lerpColor(glow, rgb(0xFFFFFF), 0.35f)
+            val tw = ((g.anim * 6).toInt() % 2)
+            for (k in 0 until 3 + g.dropRarity) {
+                val px = x + 3 + (k * 7 + tw * 3) % 26
+                val py = y - 3 - (k * 5 + tw * 2) % 10
+                c.put(px, py, a); if (k % 2 == 0) { c.put(px - 1, py, glow); c.put(px + 1, py, glow); c.put(px, py - 1, glow) }
+            }
         }
-        c.shadow(x + 4, GROUND, 4)
-        c.spriteShaded(Sprites.CHEST, x, y, false, Sprites.chestPalette(g.dropRarity))
+        c.shadowE(x + 15, GROUND + 2, 14, 3)
+        c.sprite(art, x, y, false, Sprites.chestPalette(g.dropRarity))
     }
 
     private fun drawDeadOverlay(g: GameState, c: Canvas) {
-        fun center(s: String, y: Int, col: Int) = c.text(s, (W - c.textWidth(s)) / 2, y, col)
-        center("RIP", 12, rgb(0xFF5050))
+        fun center(s: String, y: Int, col: Int, k: Int) = c.textS(s, (W - c.textWidthS(s, k)) / 2, y, col, k)
+        center("RIP", 20, rgb(0xFF5050), 3)
         val blink = ((g.anim * 2).toInt() % 2) == 0
-        center("TAP TO REVIVE", 21, if (blink) rgb(0xFFFFFF) else rgb(0xFFE08A))
-        center(Math.ceil(g.deadTimer.toDouble()).toInt().coerceAtLeast(0).toString() + "S", 30, rgb(0xB8B0E0))
+        center("TAP TO REVIVE", 44, if (blink) rgb(0xFFFFFF) else rgb(0xFFE08A), 2)
+        center(Math.ceil(g.deadTimer.toDouble()).toInt().coerceAtLeast(0).toString() + "S", 60, rgb(0xB8B0E0), 2)
     }
 
     // ---------- фон ----------
     private fun drawBackground(g: GameState, c: Canvas, t: Theme, zone: Int) {
-        for (y in 0 until GROUND) {
-            val col = lerpColor(t.skyTop, t.skyBot, y / (GROUND - 1).toFloat())
-            for (x in 0 until W) c.put(x, y, col)
+        for (y in 0 until LG) {
+            val col = lerpColor(t.skyTop, t.skyBot, y / (LG - 1).toFloat())
+            for (x in 0 until LW) c.put(x, y, col)
         }
         // шахматное смешивание на границах полос неба, чтобы градиент не был ступенчатым
-        for (y in 2 until GROUND - 1 step 4) for (x in 0 until W) {
-            if ((x + y) % 2 == 0) c.put(x, y, lerpColor(t.skyTop, t.skyBot, (y + 1) / (GROUND - 1).toFloat()))
+        for (y in 2 until LG - 1 step 4) for (x in 0 until LW) {
+            if ((x + y) % 2 == 0) c.put(x, y, lerpColor(t.skyTop, t.skyBot, (y + 1) / (LG - 1).toFloat()))
         }
         if (t.stars) {
             for (i in 0 until 30) {
-                val sx = (i * 37 + 11) % W
+                val sx = (i * 37 + 11) % LW
                 val sy = (i * 13 + 3) % 18 + 1
                 val twinkle = ((g.anim * 1.5 + i * 0.7).toInt() % 3) == 0
                 val col = if (twinkle) rgb(0xFFFFFF) else if (i % 3 == 0) rgb(0xCFC8F0) else rgb(0x8E88B8)
@@ -152,34 +192,34 @@ object Scene {
             }
         }
         drawFar(g, c, t)
-        for (x in 0 until W) {
+        for (x in 0 until LW) {
             val h2 = 5 + ((sin((x + g.scroll * 0.18) * 0.05) + 1.0) * 3.5).toInt()
-            c.rect(x, GROUND - h2, 1, h2, t.hill2)
-            c.put(x, GROUND - h2, lighten(t.hill2, 0.12f))
+            c.rect(x, LG - h2, 1, h2, t.hill2)
+            c.put(x, LG - h2, lighten(t.hill2, 0.12f))
         }
-        for (x in 0 until W) {
+        for (x in 0 until LW) {
             val h1 = 2 + ((sin((x + g.scroll * 0.35) * 0.08 + 1.7) + 1.0) * 2.6).toInt()
-            c.rect(x, GROUND - h1, 1, h1, t.hill1)
-            c.put(x, GROUND - h1, lighten(t.hill1, 0.2f))
+            c.rect(x, LG - h1, 1, h1, t.hill1)
+            c.put(x, LG - h1, lighten(t.hill1, 0.2f))
         }
         val offFar = (g.scroll * 0.45f).toInt()
-        for (sx in -16 until W + 16) {
+        for (sx in -16 until LW + 16) {
             val wx = sx + offFar
             if (wx % 53 == 0) decor(c, t, sx, (wx / 53) % 3, true)
         }
         val off = (g.scroll * 0.7f).toInt()
-        for (sx in -16 until W + 16) {
+        for (sx in -16 until LW + 16) {
             val wx = sx + off
             if (wx % 37 == 0) decor(c, t, sx, (wx / 37) % 3, false)
         }
         if (zone == 11 || zone == 12) { // лавовые трещины
-            for (x in 0 until W) if ((x + (g.scroll * 0.5f).toInt()) % 11 < 3) c.put(x, GROUND - 1, rgb(0xFF7A1A))
+            for (x in 0 until LW) if ((x + (g.scroll * 0.5f).toInt()) % 11 < 3) c.put(x, LG - 1, rgb(0xFF7A1A))
         }
     }
 
     private fun drawFar(g: GameState, c: Canvas, t: Theme) {
         val sc = g.scroll * 0.1
-        for (x in 0 until W) {
+        for (x in 0 until LW) {
             val wx = x + sc
             val h: Int = when (t.farKind) {
                 F_MOUNT -> (13 + (sin(wx * 0.04) * 6 + sin(wx * 0.11 + 1.0) * 3 + 6)).toInt()
@@ -208,13 +248,13 @@ object Scene {
                     9 + (if (m < 9) m.toInt() * 1 else (18 - m).toInt() * 1) + ((wx / 18).toInt() % 3) * 3
                 }
             }
-            if (h > 0) c.rect(x, GROUND - h, 1, h, t.far)
+            if (h > 0) c.rect(x, LG - h, 1, h, t.far)
             if (h > 0 && t.farKind == F_PYRAMID) {
                 val m = pmod(wx, 90.0)
-                if (m < 45.0 && h > 5) c.put(x, GROUND - h, lighten(t.far, 0.3f)) else if (h > 5) c.put(x, GROUND - h, darken(t.far, 0.2f))
+                if (m < 45.0 && h > 5) c.put(x, LG - h, lighten(t.far, 0.3f)) else if (h > 5) c.put(x, LG - h, darken(t.far, 0.2f))
             }
-            if (t.farKind == F_VOLCANO && Math.abs(pmod(wx, 150.0) - 75.0) < 4) c.put(x, GROUND - h, rgb(0xFF7A1A))
-            if (t.farKind == F_CASTLE && pmod(wx, 60.0) in 4.0..6.0) c.put(x, GROUND - 16, rgb(0xFFD84A))
+            if (t.farKind == F_VOLCANO && Math.abs(pmod(wx, 150.0) - 75.0) < 4) c.put(x, LG - h, rgb(0xFF7A1A))
+            if (t.farKind == F_CASTLE && pmod(wx, 60.0) in 4.0..6.0) c.put(x, LG - 16, rgb(0xFFD84A))
         }
         if (t.farKind == F_ROCKS || t.farKind == F_ISLANDS) { // парящие острова/камни
             val isl = t.farKind == F_ISLANDS
@@ -232,7 +272,7 @@ object Scene {
 
     // ---------- декор ----------
     private fun decor(c: Canvas, t: Theme, x: Int, v: Int, far: Boolean) {
-        val base = GROUND - 1
+        val base = LG - 1
         val main = if (far) lerpColor(t.decor, t.far, 0.55f) else t.decor
         val sec = if (far) lerpColor(t.decor2, t.far, 0.55f) else t.decor2
         val hi = lighten(main, 0.25f)
@@ -373,65 +413,65 @@ object Scene {
     }
 
     private fun drawGround(g: GameState, c: Canvas, t: Theme, zone: Int) {
-        c.rect(0, GROUND, W, 2, t.grass)
-        c.rect(0, GROUND + 2, W, H - GROUND - 2, t.dirt)
+        c.rect(0, LG, LW, 2, t.grass)
+        c.rect(0, LG + 2, LW, LH - LG - 2, t.dirt)
         val s = g.scroll.toInt()
         val light = lighten(t.grass, 0.22f)
         val dark = darken(t.grass, 0.2f)
-        for (x in 0 until W) {
+        for (x in 0 until LW) {
             val wx = x + s
-            if (wx % 7 == 0) c.put(x, GROUND + 4, t.dirtDark)
-            if (wx % 11 == 3) c.put(x, GROUND + 7, t.dirtDark)
-            if (wx % 5 == 1) c.put(x, GROUND, light)
-            if (wx % 13 == 6) c.put(x, GROUND + 1, dark)
-            if (wx % 17 == 9) { c.put(x, GROUND + 5, lighten(t.dirt, 0.25f)); c.put(x + 1, GROUND + 5, darken(t.dirt, 0.25f)); c.put(x, GROUND + 6, darken(t.dirt, 0.3f)) }
-            if (wx % 19 == 4) { c.put(x, GROUND + 9, lighten(t.dirt, 0.2f)); c.put(x + 1, GROUND + 9, t.dirtDark) }
-            if (wx % 9 == 2) c.put(x, GROUND - 1, t.grass)
-            if (wx % 23 == 4) { c.put(x, GROUND - 1, if (zone == 0 || zone == 1 || zone == 6) t.accent else light); if (zone == 0) c.put(x, GROUND - 2, t.accent) }
-            if (wx % 29 == 11) c.put(x, GROUND - 1, dark)
+            if (wx % 7 == 0) c.put(x, LG + 4, t.dirtDark)
+            if (wx % 11 == 3) c.put(x, LG + 7, t.dirtDark)
+            if (wx % 5 == 1) c.put(x, LG, light)
+            if (wx % 13 == 6) c.put(x, LG + 1, dark)
+            if (wx % 17 == 9) { c.put(x, LG + 5, lighten(t.dirt, 0.25f)); c.put(x + 1, LG + 5, darken(t.dirt, 0.25f)); c.put(x, LG + 6, darken(t.dirt, 0.3f)) }
+            if (wx % 19 == 4) { c.put(x, LG + 9, lighten(t.dirt, 0.2f)); c.put(x + 1, LG + 9, t.dirtDark) }
+            if (wx % 9 == 2) c.put(x, LG - 1, t.grass)
+            if (wx % 23 == 4) { c.put(x, LG - 1, if (zone == 0 || zone == 1 || zone == 6) t.accent else light); if (zone == 0) c.put(x, LG - 2, t.accent) }
+            if (wx % 29 == 11) c.put(x, LG - 1, dark)
         }
-        for (x in 0 until W) c.put(x, H - 2, darken(t.dirt, 0.3f))
-        c.rect(0, H - 1, W, 1, rgb(0x14141F))
+        for (x in 0 until LW) c.put(x, LH - 2, darken(t.dirt, 0.3f))
+        c.rect(0, LH - 1, LW, 1, rgb(0x14141F))
         val frac = (g.xp.toDouble() / g.xpNeed()).coerceIn(0.0, 1.0)
-        c.rect(0, H - 1, (W * frac).toInt(), 1, rgb(0x4DE3FF))
+        c.rect(0, LH - 1, (LW * frac).toInt(), 1, rgb(0x4DE3FF))
     }
 
     // ---------- частицы ----------
     private fun drawAmbient(g: GameState, c: Canvas, t: Theme, zone: Int) {
         val tm = g.anim.toDouble()
         val sc = g.scroll.toDouble()
-        val wd = W.toDouble()
+        val wd = LW.toDouble()
         when (t.ambient) {
             A_LEAVES -> for (i in 0 until 9) {
                 val x = pmod(i * 29.0 + sin(tm * 0.9 + i) * 4 - tm * 6 - sc * 0.15, wd).toInt()
-                val y = pmod(i * 7.0 + tm * 3.5, GROUND.toDouble()).toInt()
+                val y = pmod(i * 7.0 + tm * 3.5, LG.toDouble()).toInt()
                 c.put(x, y, if (i % 2 == 0) rgb(0x6FBF4A) else rgb(0xC98A3A))
             }
             A_DRIPS -> for (i in 0 until 6) {
-                val x = (i * 33 + 14 - (sc * 0.4).toInt() % W + W) % W
-                val y = pmod(i * 6.0 + tm * 16, GROUND + 2.0).toInt()
-                if (y < GROUND) { c.put(x, y, t.accent); if (y > 0) c.put(x, y - 1, lerpColor(t.accent, t.skyTop, 0.6f)) }
+                val x = (i * 33 + 14 - (sc * 0.4).toInt() % LW + LW) % LW
+                val y = pmod(i * 6.0 + tm * 16, LG + 2.0).toInt()
+                if (y < LG) { c.put(x, y, t.accent); if (y > 0) c.put(x, y - 1, lerpColor(t.accent, t.skyTop, 0.6f)) }
             }
             A_DUST -> for (i in 0 until 14) {
                 val x = pmod(i * 23.0 - tm * 26 - sc * 0.3, wd).toInt()
                 val y = 16 + (i * 5) % 14 + (sin(tm + i) * 1.2).toInt()
                 c.put(x, y, t.accent); if (i % 3 == 0) c.put(x + 1, y, lighten(t.accent, 0.4f))
             }
-            A_FOG -> for (j in 0 until 6) for (x in 0 until W) {
-                val y = GROUND - 6 + j
+            A_FOG -> for (j in 0 until 6) for (x in 0 until LW) {
+                val y = LG - 6 + j
                 val a = 0.06f + 0.07f * (0.5f + 0.5f * sin((x + sc * 0.2) * 0.1 + tm * 0.6 + j).toFloat())
-                val idx = y * W + x
+                val idx = y * LW + x
                 c.px[idx] = lerpColor(c.px[idx], if (zone == 7) rgb(0xBFD0F0) else rgb(0xE0D0FF), a)
             }
             A_EMBERS -> for (i in 0 until 16) {
                 val x = pmod(i * 13.0 + sin(tm * 1.3 + i) * 3 - sc * 0.2, wd).toInt()
-                val y = GROUND - 1 - pmod(tm * 7 + i * 6.0, GROUND.toDouble()).toInt()
+                val y = LG - 1 - pmod(tm * 7 + i * 6.0, LG.toDouble()).toInt()
                 c.put(x, y, if (i % 3 == 0) rgb(0xFFE08A) else rgb(0xFF7A1A))
             }
             A_SNOW -> for (i in 0 until 28) {
                 val x = pmod(i * 7.3 + sin(tm * 0.8 + i) * 2.5 - tm * 5 - sc * 0.2, wd).toInt()
-                val y = pmod(i * 5.1 + tm * (5.0 + i % 3), GROUND + 4.0).toInt()
-                if (y < H - 1) c.put(x, y, rgb(0xFFFFFF))
+                val y = pmod(i * 5.1 + tm * (5.0 + i % 3), LG + 4.0).toInt()
+                if (y < LH - 1) c.put(x, y, rgb(0xFFFFFF))
             }
             A_FIREFLY -> for (i in 0 until 12) {
                 val x = pmod(i * 17.0 + sin(tm * 0.7 + i * 2) * 8 - sc * 0.25, wd).toInt()
@@ -442,8 +482,8 @@ object Scene {
                 }
             }
             A_SPARKLE -> for (i in 0 until 18) {
-                val x = (i * 41 + 7) % W
-                val y = (i * 19 + 3) % (GROUND - 3) + 1
+                val x = (i * 41 + 7) % LW
+                val y = (i * 19 + 3) % (LG - 3) + 1
                 val ph = ((tm * 2.0 + i * 0.37) % 2.0)
                 if (ph < 0.5) {
                     val col = if (i % 2 == 0) rgb(0xFF9AF0) else rgb(0x9AF0FF)
@@ -454,12 +494,12 @@ object Scene {
             A_ASH -> {
                 for (i in 0 until 18) {
                     val x = pmod(i * 11.0 + sin(tm + i) * 3 - tm * 3 - sc * 0.2, wd).toInt()
-                    val y = pmod(i * 5.0 + tm * 4, GROUND.toDouble()).toInt()
+                    val y = pmod(i * 5.0 + tm * 4, LG.toDouble()).toInt()
                     c.put(x, y, if (i % 4 == 0) rgb(0xFF5A1A) else rgb(0x8A7A78))
                 }
                 val ph = tm % 9.0
-                if (ph in 0.0..0.12) for (y in 0 until GROUND) for (x in 0 until W) {
-                    val idx = y * W + x
+                if (ph in 0.0..0.12) for (y in 0 until LG) for (x in 0 until LW) {
+                    val idx = y * LW + x
                     c.px[idx] = lerpColor(c.px[idx], rgb(0xFFB8A0), 0.35f)
                 }
             }
@@ -475,87 +515,130 @@ object Scene {
     }
 
     private fun bar(c: Canvas, x: Int, y: Int, w: Int, frac: Double, fill: Int) {
-        c.rect(x - 1, y - 1, w + 2, 4, rgb(0x14141F))
-        c.rect(x, y, w, 2, rgb(0x3A2A3A))
+        c.rect(x - 1, y - 1, w + 2, 6, rgb(0x14141F))
+        c.rect(x, y, w, 4, rgb(0x3A2A3A))
         val f = (w * frac.coerceIn(0.0, 1.0)).toInt().coerceAtLeast(if (frac > 0) 1 else 0)
-        c.rect(x, y, f, 2, fill)
-        c.rect(x, y, f, 1, lighten(fill, 0.3f))
+        c.rect(x, y, f, 4, fill)
+        c.rect(x, y, f, 1, lighten(fill, 0.35f))
+        c.rect(x, y + 3, f, 1, darken(fill, 0.25f))
     }
 
     // ---------- персонажи ----------
     private fun drawActors(g: GameState, c: Canvas, zone: Int) {
         if (g.dead) {
-            c.shadow(HERO_X + 8, GROUND, 6)
-            c.spriteShaded(Sprites.GRAVE, HERO_X + 3, GROUND - Sprites.GRAVE.size, false, Sprites.monsterPalette(0))
+            val gr = Sprites.GRAVE
+            c.shadowE(HERO_X + 28, GROUND + 2, 15, 3)
+            c.sprite(gr, HERO_X + 15, GROUND + 4 - gr.size, false, Sprites.gravePalette())
             return
         }
         val cls = g.heroClass.coerceIn(0, 4)
-        val frames = Sprites.HEROES[cls]
-        val heroArt = when {
-            g.attackAnim > 0.125f -> frames[2]
-            g.attackAnim > 0f -> frames[3]
-            g.phase == Phase.WALK && ((g.anim * 5).toInt() % 2 == 1) -> frames[1]
-            else -> frames[0]
-        }
+        val walking = g.phase == Phase.WALK
         val heroTint = if (g.flashHero > 0) rgb(0xFF6060) else 0
-        val bob = if (g.phase == Phase.WALK && ((g.anim * 5).toInt() % 2 == 1)) 1 else 0
-        val hy = GROUND - HERO_H
-        c.shadow(HERO_X + 8, GROUND, 7)
-        c.spriteShaded(heroArt, HERO_X, hy - bob, false, Sprites.heroPalette(cls, g.swordTier(), g.armorTier(), heroTint))
-        if (g.blessing > 0) { // золотое сияние над героем
-            val tw = ((g.anim * 8).toInt() % 3)
-            c.put(HERO_X + 3 + tw * 3, hy - 1 - tw, rgb(0xFFE08A)); c.put(HERO_X + 10 - tw * 2, hy + 1 + tw, rgb(0xFFFFFF))
+        val hy: Int
+        val hx: Int
+        val feetX: Int
+        if (cls == 0) { // воин: нарисованные вручную кадры (WarriorData)
+            val art: Array<String>
+            var bob = 0
+            if (g.attackAnim > 0f) {
+                val p = ((Balance.ATTACK_ANIM - g.attackAnim) / Balance.ATTACK_ANIM).coerceIn(0f, 0.999f)
+                art = WarriorData.ATTACK[(p * WarriorData.ATTACK.size).toInt()]
+            } else if (walking) {
+                art = WarriorData.VIEW_EAST
+                bob = if (((g.anim * 8).toInt() % 2) == 1) 1 else 0
+            } else art = WarriorData.ATTACK[0]
+            hx = HERO_X - WarriorData.FEET_X + 28
+            hy = GROUND + 4 - art.size - bob
+            feetX = HERO_X + 28
+            c.shadowE(feetX, GROUND + 2, 19, 4)
+            c.sprite(art, hx, hy, false, Sprites.warriorPalette(heroTint))
+        } else {
+            val frames = Sprites.HEROES[cls]
+            val fi = when {
+                g.attackAnim > ATK_HALF -> Sprites.F_WINDUP
+                g.attackAnim > 0f -> Sprites.F_STRIKE
+                walking -> WALK_CYCLE[(g.anim * 8).toInt() % 4]
+                else -> Sprites.F_IDLE
+            }
+            val heroArt = frames[fi]
+            hx = HERO_X
+            hy = GROUND + 4 - heroArt.size
+            feetX = HERO_X + 24
+            c.shadowE(feetX, GROUND + 2, 19, 4)
+            c.sprite(heroArt, hx, hy, false, Sprites.heroPalette(cls, g.swordTier(), g.armorTier(), heroTint))
+        }
+        if (g.blessing > 0) { // золотое сияние вокруг героя
+            for (k in 0 until 6) {
+                val a = k * Math.PI / 3 + g.anim * 1.5
+                val px = feetX + (Math.cos(a) * 22).toInt()
+                val py = hy + 22 + (Math.sin(a) * 20).toInt()
+                c.put(px, py, rgb(0xFFE08A)); c.put(px + 1, py, rgb(0xFFFFFF)); c.put(px, py + 1, rgb(0xFFB84A))
+            }
         }
         if (g.shield > 0) {
-            for (i in 0 until 12) { val a = i * Math.PI / 6 + g.anim * 2; c.put(HERO_X + 8 + (Math.cos(a) * 9).toInt(), hy + 8 + (Math.sin(a) * 9).toInt(), rgb(0x6AF0FF)) }
+            for (i in 0 until 20) {
+                val a = i * Math.PI / 10 + g.anim * 2
+                val px = feetX + (Math.cos(a) * 26).toInt()
+                val py = hy + 24 + (Math.sin(a) * 25).toInt()
+                c.put(px, py, rgb(0x6AF0FF)); c.put(px + 1, py, rgb(0xBFFBFF))
+            }
         }
-        bar(c, HERO_X + 3, hy - 5, 12, g.hp / g.maxHp(), rgb(0x4CE06A))
+        bar(c, feetX - 14, hy - 5, 28, g.hp / g.maxHp(), rgb(0x4CE06A))
 
         val m = g.monster ?: return
         val art = Sprites.MONSTERS[m.type][(g.anim * 3).toInt() % 2]
         val mw = art[0].length
         val mh = art.size
-        val mx = HERO_X + 18 + g.dist.toInt()
+        val mx = MON_X0 + (g.dist * 2f).toInt()
         val flyer = m.type == 1 || m.type == 7 || m.type == 10 || m.type == 15
-        val hover = if (flyer) 3 + (sin(g.anim * 4.0) * 1.5).toInt() else 0
-        val my = GROUND - mh - hover
+        val hover = if (flyer) 9 + (sin(g.anim * 4.0) * 3).toInt() else 0
+        val my = GROUND + 4 - mh - hover
         val tint = if (g.flashMon > 0) rgb(0xFFFFFF) else 0
-        c.shadow(mx + mw / 2, GROUND, if (flyer) mw / 2 - 2 else mw / 2)
-        c.spriteShaded(art, mx, my, true, Sprites.monsterPalette(tint, if (m.boss) zone % 5 else 0))
+        c.shadowE(mx + mw / 2, GROUND + 2, if (flyer) mw / 3 else mw / 2 - 2, if (flyer) 3 else 4, if (flyer) 0.22f else 0.34f)
+        c.sprite(art, mx, my, true, Sprites.monsterPalette(m.type, tint, if (m.boss) zone % 5 else 0))
         // снаряды дальнего боя: шар мага и стрела лучника летят к монстру
-        if (g.attackAnim in 0.0001f..0.125f && (cls == 1 || cls == 2)) {
-            val p = (0.125f - g.attackAnim) / 0.125f
-            val px = HERO_X + 14 + ((mx + 2 - HERO_X - 14) * p).toInt()
-            val py = GROUND - 9
-            if (cls == 1) { circle(c, px, py, 1, rgb(0x8AF0FF)); c.put(px, py, rgb(0xFFFFFF)); c.put(px - 2, py, rgb(0x4A7AD8)) }
-            else { c.rect(px - 3, py, 4, 1, rgb(0xE8EEF5)); c.put(px + 1, py, rgb(0xFFFFFF)); c.put(px - 3, py - 1, rgb(0xFFD24A)) }
+        if (g.attackAnim in 0.0001f..ATK_HALF && (cls == 1 || cls == 2)) {
+            val p = (ATK_HALF - g.attackAnim) / ATK_HALF
+            val sx = HERO_X + 44
+            val px = sx + ((mx + 8 - sx) * p).toInt()
+            val py = GROUND - 20
+            if (cls == 1) {
+                circle(c, px, py, 4, rgb(0x4A7AD8)); circle(c, px, py, 3, rgb(0x8AF0FF)); circle(c, px, py, 1, rgb(0xFFFFFF))
+                for (k in 1..3) c.put(px - 4 - k * 2, py + (k % 2), rgb(0x8AF0FF))
+            } else {
+                c.rect(px - 10, py, 12, 2, rgb(0xE8EEF5)); c.rect(px + 2, py - 1, 3, 4, rgb(0xFFFFFF))
+                c.rect(px - 10, py - 1, 3, 4, rgb(0xFFD24A))
+            }
         }
         if (m.boss) {
             val pulse = ((g.anim * 4).toInt() % 2) == 0
-            c.put(mx + mw / 2, my - 7, if (pulse) rgb(0xFF3030) else rgb(0x801818))
+            c.rect(mx + mw / 2 - 2, my - 12, 5, 5, if (pulse) rgb(0xFF3030) else rgb(0x801818))
         }
         if (g.phase == Phase.FIGHT || g.dist < 40f) {
-            val bw = if (m.boss) 18 else 12
-            bar(c, mx + (mw - bw) / 2, my - 5, bw, m.hp / m.maxHp, rgb(0xFF5050))
+            val bw = if (m.boss) 44 else 30
+            bar(c, mx + (mw - bw) / 2, my - 6, bw, m.hp / m.maxHp, rgb(0xFF5050))
         }
     }
 
     private fun drawHud(g: GameState, c: Canvas) {
-        c.text("LV" + g.level + " G" + Fmt.num(g.gold), 3, 2, rgb(0xFFFFFF))
+        c.textS("LV" + g.level + " G" + Fmt.num(g.gold), 5, 4, rgb(0xFFFFFF), 2)
         val st = "ST" + g.stage + " " + (g.kills + 1) + "/" + Balance.KILLS_PER_STAGE
-        c.text(st, W - c.textWidth(st) - 3, 2, rgb(0xFFE08A))
+        c.textS(st, W - c.textWidthS(st, 2) - 5, 4, rgb(0xFFE08A), 2)
         val best = g.bestChest()
         if (best >= 0) {
-            val x = 84
+            val x = 168
             val col = rgb(Rarity.COLORS[best])
-            c.rect(x, 2, 9, 6, rgb(0x1B1B2F))
-            c.rect(x + 1, 3, 7, 4, col)
-            c.rect(x + 1, 3, 7, 1, lighten(col, 0.3f))
-            c.put(x + 4, 5, rgb(0xFFE08A))
-            c.text(g.chestTotal().toString(), x + 11, 2, col)
+            c.rect(x, 4, 18, 12, rgb(0x1B1B2F))
+            c.rect(x + 2, 6, 14, 8, col)
+            c.rect(x + 2, 6, 14, 2, lighten(col, 0.3f))
+            c.rect(x + 8, 10, 3, 3, rgb(0xFFE08A))
+            c.textS(g.chestTotal().toString(), x + 22, 4, col, 2)
         }
         for (p in g.popups) {
-            c.text(p.text, p.x.toInt(), p.y.toInt().coerceAtLeast(10), p.color)
+            c.textS(p.text, (p.x * 2f).toInt(), (p.y * 2f).toInt().coerceAtLeast(16), p.color, 2)
         }
     }
+
+    private const val ATK_HALF = Balance.ATTACK_ANIM / 2
+    private val WALK_CYCLE = intArrayOf(Sprites.F_WALK_A, Sprites.F_IDLE, Sprites.F_WALK_B, Sprites.F_IDLE)
 }

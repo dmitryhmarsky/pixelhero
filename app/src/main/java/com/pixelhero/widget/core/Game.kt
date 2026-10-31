@@ -60,6 +60,8 @@ object Balance {
     const val MON_INTERVAL = 1.2f
     const val BOSS_INTERVAL = 1.0f
     const val GAP = 1.5f
+    /** Длительность анимации удара героя, секунд. */
+    const val ATTACK_ANIM = 0.6f
     const val OFFLINE_CAP_SEC = 8 * 3600.0
 
     // [тип] -> множители (hp, atk)
@@ -492,7 +494,7 @@ class GameState(seed: Long = 12345L) {
         monTimer -= h
         if (heroTimer <= 0) {
             heroTimer += (Balance.HERO_INTERVAL * Balance.CLASS_INTERVAL[heroClass] / (1.0 + min(gear[Stat.ASPD], 60.0) / 100.0)).toFloat()
-            attackAnim = 0.25f
+            attackAnim = Balance.ATTACK_ANIM
             val crit = rng.float() < 1.0 / Balance.CLASS_CRIT_ROLL[heroClass] + gear[Stat.CRIT] / 100.0
             val dmg = attack() * (if (crit) 2.0 else 1.0) * (0.9 + 0.2 * rng.float())
             m.hp -= dmg
