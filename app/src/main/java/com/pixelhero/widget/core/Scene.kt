@@ -539,13 +539,12 @@ object Scene {
         val feetX: Int
         if (cls == 0) { // воин: нарисованные вручную кадры (WarriorData)
             val art: Array<String>
-            var bob = 0
+            val bob = 0
             if (g.attackAnim > 0f) {
                 val p = ((Balance.ATTACK_ANIM - g.attackAnim) / Balance.ATTACK_ANIM).coerceIn(0f, 0.999f)
                 art = WarriorData.ATTACK[(p * WarriorData.ATTACK.size).toInt()]
             } else if (walking) {
-                art = WarriorData.VIEW_EAST
-                bob = if (((g.anim * 8).toInt() % 2) == 1) 1 else 0
+                art = WarriorData.WALK[(g.anim * 10).toInt() % WarriorData.WALK.size]
             } else art = WarriorData.ATTACK[0]
             hx = HERO_X - WarriorData.FEET_X + 28
             hy = GROUND + 4 - art.size - bob

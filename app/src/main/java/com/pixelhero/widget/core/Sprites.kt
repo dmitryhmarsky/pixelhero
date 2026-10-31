@@ -51,7 +51,7 @@ object Sprites {
         return t
     }
 
-    private fun pal(t: IntArray): (Char) -> Int = { ch -> if (ch.code < 128) t[ch.code] else 0 }
+    private fun pal(t: IntArray): (Char) -> Int = { ch -> if (ch.code < t.size) t[ch.code] else 0 }
 
     // Материалы героя: 0 кожа, 1 сталь, 2 броня (тир), 3 клинок/оружие (тир), 4 цвет класса, 5 тёмный цвет класса,
     // 6 кожа-ремни, 7 золото, 8 волосы, 9 дерево, 10 свечение, 11 глаза.
@@ -117,7 +117,7 @@ object Sprites {
     /** Палитра воина, нарисованного вручную (WarriorData): цвета берутся из картинки, tint даёт вспышку удара. */
     fun warriorPalette(tint: Int): (Char) -> Int {
         val t = warriorTables.getOrPut(if (tint != 0) tint else 0) {
-            val a = IntArray(128)
+            val a = IntArray(1280)
             for (i in WarriorData.CHARS.indices) a[WarriorData.CHARS[i].code] = if (tint != 0) tint else rgb(WarriorData.PALETTE[i])
             a
         }

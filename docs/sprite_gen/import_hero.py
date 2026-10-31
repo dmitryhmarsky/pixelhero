@@ -4,8 +4,8 @@ import sys, glob, os
 from PIL import Image
 
 src, out = sys.argv[1], sys.argv[2]
-ALPHA = [c for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#%&()*+,-/:;<=>?@[]^_{|}~"]
-names = ['attack_%02d' % i for i in range(15)] + ['view_east', 'view_west', 'view_north', 'view_south']
+ALPHA = [c for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#%&()*+,-/:;<=>?@[]^_{|}~"] + [chr(c) for c in range(0x410, 0x430)]
+names = ['attack_%02d' % i for i in range(15)] + ['walk_%02d' % i for i in range(9)] + ['view_east', 'view_west', 'view_north', 'view_south']
 ims = {n: Image.open(os.path.join(src, n + '.png')).convert('RGBA') for n in names}
 
 # опорная точка: центр стоп (нижние 4 строки) кадра attack_00; все кадры выравниваются по низу и стопам
@@ -15,15 +15,18 @@ def feet(im):
     xs = [x for y in range(bottom - 4, bottom) for x in range(im.width) if im.getpixel((x, y))[3] > 0]
     return (min(xs) + max(xs)) / 2.0, bottom
 
-fx0, fb0 = feet(ims['attack_00'])
+anchor = {'attack': feet(ims['attack_00']), 'walk': feet(ims['walk_00'])}
 CW, CH = 64, 50
 OX, OBOT = 26, 48
 canvas = {}
 for n, im in ims.items():
     fx, fb = feet(im)
     c = Image.new('RGBA', (CW, CH), (0, 0, 0, 0))
-    dx = int(round(OX - fx)) if n.startswith('view') else int(round(OX - fx0))
-    dy = OBOT - fb
+    grp = n.split('_')[0]
+    if grp == 'view':
+        dx, dy = int(round(OX - fx)), OBOT - fb
+    else:  # кадры уже согласованы между собой: один сдвиг на всю группу
+        dx, dy = int(round(OX - anchor[grp][0])), OBOT - anchor[grp][1]
     c.alpha_composite(im, (dx, dy)) if False else c.paste(im, (dx, dy), im)
     canvas[n] = c
 
@@ -66,6 +69,10 @@ L = ['package com.pixelhero.widget.core', '',
 L.append('    /** 15 кадров анимации атаки (замах, удар, возврат). */')
 L.append('    val ATTACK = arrayOf(')
 for i in range(15): L.append('        sp(' + lit(rows(canvas['attack_%02d' % i])) + '),')
+L.append('    )')
+L.append('    /** 9 кадров цикла ходьбы вправо. */')
+L.append('    val WALK = arrayOf(')
+for i in range(9): L.append('        sp(' + lit(rows(canvas['walk_%02d' % i])) + '),')
 L.append('    )')
 for v in ('east', 'west', 'north', 'south'):
     L.append('    val VIEW_%s = sp(%s)' % (v.upper(), lit(rows(canvas['view_' + v]))))
